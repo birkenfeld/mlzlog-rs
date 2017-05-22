@@ -1,0 +1,16 @@
+[package]
+name = "mlzlog"
+version = "0.1.0"
+authors = ["Georg Brandl <g.brandl@fz-juelich.de>"]
+license = "MIT/Apache-2.0"
+description = "A collection of log4rs tools to log like the mlzlog Python package"
+repository = "https://github.com/birkenfeld/mlzlog-rs"
+documentation = "http://docs.rs/mlzlog"
+keywords = ["logging", "mlz", "colored", "rolling"]
+
+[dependencies]
+log = "0.3"
+time = "0.1"
+log4rs = "0.7"
+ansi_term = "0.9"
+parking_lot = "0.4"
