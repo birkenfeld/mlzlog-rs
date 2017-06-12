@@ -7,6 +7,7 @@
 pub extern crate log4rs;
 
 extern crate log;
+extern crate log_mdc;
 extern crate time;
 extern crate ansi_term;
 extern crate parking_lot;
@@ -36,8 +37,10 @@ fn ensure_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
     DirBuilder::new().recursive(true).create(path)
 }
 
+
 /// A log4rs appender that writes ANSI colored log messages to stdout.
 pub struct ConsoleAppender {
+    prefix: String,
     stdout: Stdout,
 }
 
@@ -48,14 +51,14 @@ impl fmt::Debug for ConsoleAppender {
 }
 
 impl ConsoleAppender {
-    pub fn new() -> ConsoleAppender {
-        ConsoleAppender { stdout: io::stdout() }
+    pub fn new(prefix: &str) -> ConsoleAppender {
+        ConsoleAppender { prefix: prefix.into(), stdout: io::stdout() }
     }
 }
 
 impl Default for ConsoleAppender {
     fn default() -> Self {
-        Self::new()
+        Self::new("")
     }
 }
 
@@ -63,19 +66,25 @@ impl Append for ConsoleAppender {
     fn append(&self, record: &LogRecord) -> Result<(), Box<Error + Send + Sync>> {
         let mut stdout = self.stdout.lock();
         let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
-        let msg = match record.level() {
-            LogLevel::Error => Red.bold().paint(
-                format!("ERROR: {}", record.args())),
-            LogLevel::Warn  => Purple.paint(
-                format!("WARNING: {}", record.args())),
-            LogLevel::Debug => White.paint(format!("{}", record.args())),
-            _ => From::from(format!("{}", record.args())),
-        };
+        let msg = log_mdc::get("thread", |thread_str| {
+            let thread_str = thread_str.unwrap_or("");
+            match record.level() {
+                LogLevel::Error => Red.bold().paint(
+                    format!("{}{}ERROR: {}", self.prefix, thread_str, record.args())),
+                LogLevel::Warn  => Purple.paint(
+                    format!("{}{}WARNING: {}", self.prefix, thread_str, record.args())),
+                LogLevel::Debug => White.paint(
+                    format!("{}{}{}", self.prefix, thread_str, record.args())),
+                _ => From::from(
+                    format!("{}{}{}", self.prefix, thread_str, record.args())),
+            }
+        });
         writeln!(stdout, "{} {}", White.paint(time_str), msg)?;
         stdout.flush()?;
         Ok(())
     }
 }
+
 
 type Writer = SimpleWriter<BufWriter<File>>;
 
@@ -94,7 +103,7 @@ impl RollingFileAppender {
     pub fn new(dir: &Path, prefix: &str) -> RollingFileAppender {
         let thisday = Tm { tm_hour: 0, tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
         let roll_at = (thisday + Duration::days(1)).to_timespec();
-        let pattern = PatternEncoder::new("{d(%H:%M:%S,%f)(local)} : {l:<5} : {m}{n}");
+        let pattern = PatternEncoder::new("{d(%H:%M:%S,%f)(local)} : {l:<5} : {X(thread)}{m}{n}");
         let link_fn = dir.join("current");
         let prefix = prefix.replace("/", "-");
         RollingFileAppender { dir: dir.to_path_buf(), prefix, link_fn,
@@ -136,10 +145,11 @@ impl Append for RollingFileAppender {
 /// over on midnight.  A symbolic link named `current` always links to the
 /// latest file.
 ///
+/// If `show_appname` is true, the appname is prepended to console messages.
 /// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
 /// `ConsoleAppender` is created to log to stdout.
-pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, debug: bool,
-                            use_stdout: bool) -> io::Result<()> {
+pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, show_appname: bool,
+                            debug: bool, use_stdout: bool) -> io::Result<()> {
     ensure_dir(log_path.as_ref())?;
 
     let file_appender = RollingFileAppender::new(log_path.as_ref(), appname);
@@ -150,7 +160,9 @@ pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, debug: bool,
     let mut config = Config::builder()
         .appender(Appender::builder().build("file", Box::new(file_appender)));
     if use_stdout {
-        let con_appender = ConsoleAppender::new();
+        let appname_prefix = format!("[{}] ", appname);
+        let prefix = if show_appname { &appname_prefix } else { "" };
+        let con_appender = ConsoleAppender::new(prefix);
         config = config.appender(Appender::builder().build("con", Box::new(con_appender)));
     }
     let config = config.build(root_cfg.build(if debug { LogLevelFilter::Debug }
@@ -159,4 +171,12 @@ pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, debug: bool,
 
     let _ = log4rs::init_config(config);
     Ok(())
+}
+
+
+/// Set logging prefix for the current thread.
+///
+/// This prefix is prepended to every log message from that thread.
+pub fn set_thread_prefix(prefix: String) {
+    log_mdc::insert("thread", prefix);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "mlzlog"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Georg Brandl <g.brandl@fz-juelich.de>"]
 license = "MIT/Apache-2.0"
 description = "A collection of log4rs tools to log like the mlzlog Python package"
@@ -15,6 +15,7 @@ features = ["pattern_encoder", "simple_writer"]
 
 [dependencies]
 log = "0.3"
+log-mdc = "0.1"
 time = "0.1"
 ansi_term = "0.9"
 parking_lot = "0.4"
