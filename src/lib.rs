@@ -36,19 +36,6 @@ fn ensure_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
     DirBuilder::new().recursive(true).create(path)
 }
 
-fn open_file<P: AsRef<Path>>(path: P, mode: &str) -> io::Result<File> {
-    let mut opt = OpenOptions::new();
-    for ch in mode.chars() {
-        match ch {
-            'r' => { opt.read(true); },
-            'w' => { opt.write(true).create(true); },
-            'a' => { opt.write(true).append(true); },
-            _   => { },  // ignore unsupported chars
-        }
-    }
-    opt.open(path)
-}
-
 /// A log4rs appender that writes ANSI colored log messages to stdout.
 pub struct ConsoleAppender {
     stdout: Stdout,
@@ -119,7 +106,7 @@ impl RollingFileAppender {
         let time = strftime("%Y-%m-%d", &now()).unwrap();
         let full = format!("{}-{}.log", self.prefix, time);
         let new_fn = self.dir.join(full);
-        let fp = open_file(&new_fn, "wa")?;
+        let fp = OpenOptions::new().write(true).append(true).open(&new_fn)?;
         *file_opt = Some(SimpleWriter(BufWriter::new(fp)));
         let _ = remove_file(&self.link_fn);
         let _ = symlink(&new_fn.file_name().unwrap(), &self.link_fn);
@@ -144,12 +131,13 @@ impl Append for RollingFileAppender {
 
 /// Initialize default mlzlog settings.
 ///
-/// `log_path` is the base path for logfiles, in which a subdirectory `appname`
-/// is created for this application.  The application name is at the same time
-/// used as the base name for the logfiles.
+/// `log_path` is the base path for logfiles.  The `appname` is used as the base
+/// name for the logfiles, with the current day appended.  The logfile is rolled
+/// over on midnight.  A symbolic link named `current` always links to the
+/// latest file.
 ///
-/// If `debug` is true, debug messages are logged.
-/// If `use_stdout` is true, a `ConsoleAppender` is created to log to stdout.
+/// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
+/// `ConsoleAppender` is created to log to stdout.
 pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, debug: bool,
                             use_stdout: bool) -> io::Result<()> {
     ensure_dir(log_path.as_ref())?;
