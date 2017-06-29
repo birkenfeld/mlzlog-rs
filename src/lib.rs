@@ -115,7 +115,9 @@ impl RollingFileAppender {
         let time = strftime("%Y-%m-%d", &now()).unwrap();
         let full = format!("{}-{}.log", self.prefix, time);
         let new_fn = self.dir.join(full);
-        let fp = OpenOptions::new().write(true).append(true).open(&new_fn)?;
+        let fp = OpenOptions::new()
+            .create(true).write(true).append(true)
+            .open(&new_fn)?;
         *file_opt = Some(SimpleWriter(BufWriter::new(fp)));
         let _ = remove_file(&self.link_fn);
         let _ = symlink(&new_fn.file_name().unwrap(), &self.link_fn);
