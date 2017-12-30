@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
 
 use time::{Timespec, Tm, Duration, get_time, now, strftime};
-use log::{LogLevel, LogRecord, LogLevelFilter};
+use log::{Level, Record, LevelFilter};
 use log4rs::append::Append;
 use log4rs::encode::Encode;
 use log4rs::encode::pattern::PatternEncoder;
@@ -63,17 +63,17 @@ impl Default for ConsoleAppender {
 }
 
 impl Append for ConsoleAppender {
-    fn append(&self, record: &LogRecord) -> Result<(), Box<Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> Result<(), Box<Error + Send + Sync>> {
         let mut stdout = self.stdout.lock();
         let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         let msg = log_mdc::get("thread", |thread_str| {
             let thread_str = thread_str.unwrap_or("");
             match record.level() {
-                LogLevel::Error => Red.bold().paint(
+                Level::Error => Red.bold().paint(
                     format!("{}{}ERROR: {}", self.prefix, thread_str, record.args())),
-                LogLevel::Warn  => Purple.paint(
+                Level::Warn  => Purple.paint(
                     format!("{}{}WARNING: {}", self.prefix, thread_str, record.args())),
-                LogLevel::Debug => White.paint(
+                Level::Debug => White.paint(
                     format!("{}{}{}", self.prefix, thread_str, record.args())),
                 _ => From::from(
                     format!("{}{}{}", self.prefix, thread_str, record.args())),
@@ -82,6 +82,10 @@ impl Append for ConsoleAppender {
         writeln!(stdout, "{} {}", White.paint(time_str), msg)?;
         stdout.flush()?;
         Ok(())
+    }
+
+    fn flush(&self) {
+        // nothing here, like in upstream appender impl
     }
 }
 
@@ -127,7 +131,7 @@ impl RollingFileAppender {
 }
 
 impl Append for RollingFileAppender {
-    fn append(&self, record: &LogRecord) -> Result<(), Box<Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> Result<(), Box<Error + Send + Sync>> {
         let (ref mut file_opt, ref mut roll_at) = *self.file.lock();
         if file_opt.is_none() || get_time() >= *roll_at {
             self.rollover(file_opt, roll_at)?;
@@ -136,6 +140,10 @@ impl Append for RollingFileAppender {
         self.pattern.encode(fp, record)?;
         fp.flush()?;
         Ok(())
+    }
+
+    fn flush(&self) {
+        // nothing here, like in upstream appender impl
     }
 }
 
@@ -167,8 +175,8 @@ pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, show_appname: bool,
         let con_appender = ConsoleAppender::new(prefix);
         config = config.appender(Appender::builder().build("con", Box::new(con_appender)));
     }
-    let config = config.build(root_cfg.build(if debug { LogLevelFilter::Debug }
-                                             else { LogLevelFilter::Info }))
+    let config = config.build(root_cfg.build(if debug { LevelFilter::Debug }
+                                             else { LevelFilter::Info }))
                        .expect("error building logging config");
 
     let _ = log4rs::init_config(config);
