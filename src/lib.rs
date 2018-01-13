@@ -12,6 +12,7 @@ extern crate time;
 extern crate ansi_term;
 extern crate parking_lot;
 
+use std::env;
 use std::fmt;
 use std::error::Error;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
@@ -55,7 +56,8 @@ impl fmt::Debug for ConsoleAppender {
 
 impl ConsoleAppender {
     pub fn new(prefix: &str) -> ConsoleAppender {
-        ConsoleAppender { prefix: prefix.into(), stdout: io::stdout() }
+        ConsoleAppender { prefix: prefix.into(),
+                          stdout: io::stdout(), }
     }
 }
 
@@ -113,12 +115,15 @@ impl RollingFileAppender {
         let pattern = PatternEncoder::new("{d(%H:%M:%S,%f)(local)} : {l:<5} : {X(thread)}{m}{n}");
         let link_fn = dir.join("current");
         let prefix = prefix.replace("/", "-");
-        RollingFileAppender { dir: dir.to_path_buf(), prefix, link_fn,
-                              file: Mutex::new((None, roll_at)), pattern }
+        RollingFileAppender { dir: dir.to_path_buf(),
+                              prefix,
+                              link_fn,
+                              file: Mutex::new((None, roll_at)),
+                              pattern, }
     }
 
     fn rollover(&self, file_opt: &mut Option<Writer>, roll_at: &mut Timespec) -> io::Result<()> {
-        file_opt.take();  // will drop the file if open
+        file_opt.take(); // will drop the file if open
         let time = strftime("%Y-%m-%d", &now()).unwrap();
         let full = format!("{}-{}.log", self.prefix, time);
         let new_fn = self.dir.join(full);
@@ -158,25 +163,45 @@ impl Append for RollingFileAppender {
 /// over on midnight.  A symbolic link named `current` always links to the
 /// latest file.
 ///
+/// If `log_path` is `None`, no logfiles are written to disk.
+///
+/// The hardcoded setting of `log_path` can be overridden by an environment
+/// variabled named `MLZ_LOG_PATH`.  If it is empty, no logfiles are written,
+/// else it specifies the new base path.
+///
 /// If `show_appname` is true, the appname is prepended to console messages.
 /// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
 /// `ConsoleAppender` is created to log to stdout.
-pub fn init<P: AsRef<Path>>(log_path: P, appname: &str, show_appname: bool,
-                            debug: bool, use_stdout: bool) -> io::Result<()> {
-    ensure_dir(log_path.as_ref())?;
+pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
+                            show_appname: bool, debug: bool, use_stdout: bool)
+                            -> io::Result<()> {
+    let mut config = Config::builder();
+    let mut root_cfg = Root::builder();
+    let mut log_path = log_path.map(|p| p.as_ref().to_path_buf());
 
-    let file_appender = RollingFileAppender::new(log_path.as_ref(), appname);
-    let mut root_cfg = Root::builder().appender("file");
-    if use_stdout {
-        root_cfg = root_cfg.appender("con");
+    // override
+    if let Some(path) = env::var_os("MLZ_LOG_PATH") {
+        if path.is_empty() {
+            log_path = None;
+        } else {
+            log_path = Some(Path::new(&path).to_path_buf());
+        }
     }
-    let mut config = Config::builder()
-        .appender(Appender::builder().build("file", Box::new(file_appender)));
+
+    if let Some(p) = log_path {
+        ensure_dir(&p)?;
+        let file_appender = RollingFileAppender::new(&p, appname);
+        root_cfg = root_cfg.appender("file");
+        config = config
+            .appender(Appender::builder().build("file", Box::new(file_appender)));
+    }
     if use_stdout {
         let appname_prefix = format!("[{}] ", appname);
         let prefix = if show_appname { &appname_prefix } else { "" };
         let con_appender = ConsoleAppender::new(prefix);
-        config = config.appender(Appender::builder().build("con", Box::new(con_appender)));
+        root_cfg = root_cfg.appender("con");
+        config = config
+            .appender(Appender::builder().build("con", Box::new(con_appender)));
     }
     let config = config.build(root_cfg.build(if debug { LevelFilter::Debug }
                                              else { LevelFilter::Info }))
