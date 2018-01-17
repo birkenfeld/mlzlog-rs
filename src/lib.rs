@@ -16,9 +16,12 @@ use std::fmt;
 use std::error::Error;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
 use std::io::{self, Stdout, Write, BufWriter};
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
+#[cfg(target_family = "unix")]
+use std::os::unix::fs::symlink;
+#[cfg(target_family = "windows")]
+use std::os::windows::fs::symlink_file as symlink;
 
 use time::{Timespec, Tm, Duration, get_time, now, strftime};
 use log::{Level, Record, LevelFilter};
