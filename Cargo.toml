@@ -8,14 +8,14 @@ repository = "https://github.com/birkenfeld/mlzlog-rs"
 documentation = "http://docs.rs/mlzlog"
 keywords = ["logging", "mlz", "colored", "rolling"]
 
+[dependencies]
+log = "0.4.3"
+log-mdc = "0.1.0"
+time = "0.1.40"
+ansi_term = "0.11.0"
+parking_lot = "0.6.2"
+
 [dependencies.log4rs]
-version = "0.8"
+version = "0.8.0"
 default-features = false
 features = ["pattern_encoder", "simple_writer"]
-
-[dependencies]
-log = "0.4"
-log-mdc = "0.1"
-time = "0.1.38"
-ansi_term = "0.10"
-parking_lot = "0.5"
