@@ -215,6 +215,6 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
 /// Set logging prefix for the current thread.
 ///
 /// This prefix is prepended to every log message from that thread.
-pub fn set_thread_prefix(prefix: String) {
-    log_mdc::insert("thread", prefix);
+pub fn set_thread_prefix(prefix: impl Into<String>) {
+    log_mdc::insert("thread", prefix.into());
 }
