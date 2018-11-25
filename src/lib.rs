@@ -9,6 +9,7 @@ pub extern crate log4rs;
 extern crate log;
 extern crate log_mdc;
 extern crate time;
+extern crate fxhash;
 extern crate ansi_term;
 extern crate parking_lot;
 
@@ -18,6 +19,7 @@ use std::error::Error;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
 use std::io::{self, Stdout, Write, BufWriter};
 use std::path::{Path, PathBuf};
+use fxhash::FxHashSet;
 use parking_lot::Mutex;
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::symlink;
@@ -27,6 +29,7 @@ use std::os::windows::fs::symlink_file as symlink;
 use time::{Timespec, Tm, Duration, get_time, now, strftime};
 use log::{Level, Record, LevelFilter};
 use log4rs::append::Append;
+use log4rs::filter::{Filter, Response as FilterResponse};
 use log4rs::encode::Encode;
 use log4rs::encode::pattern::PatternEncoder;
 use log4rs::encode::writer::simple::SimpleWriter;
@@ -155,6 +158,56 @@ impl Append for RollingFileAppender {
     }
 }
 
+/// A log4rs filter for filtering by target.
+#[derive(Debug, Clone)]
+pub struct TargetFilter {
+    black: FxHashSet<String>,
+    white: FxHashSet<String>,
+}
+
+impl Filter for TargetFilter {
+    fn filter(&self, record: &Record) -> FilterResponse {
+        self.filter_inner(record.target())
+    }
+}
+
+impl TargetFilter {
+    fn new(black: FxHashSet<String>, white: FxHashSet<String>) -> Self {
+        Self { black, white }
+    }
+
+    fn filter_inner(&self, target: &str) -> FilterResponse {
+        use FilterResponse::*;
+        if self.black.contains(target) {
+            Reject
+        } else if self.white.contains(target) {
+            Neutral
+        } else {
+            // no specific entry for this module, try the parent
+            target.rsplitn(2, "::").nth(1).map_or_else(
+                || if self.white.is_empty() { Neutral } else { Reject },
+                |parent| self.filter_inner(parent))
+        }
+    }
+}
+
+fn parse_filter_config(cfg: String) -> TargetFilter {
+    let mut black = FxHashSet::default();
+    let mut white = FxHashSet::default();
+
+    for entry in cfg.split(',') {
+        if entry.starts_with('-') {
+            black.insert(entry[1..].into());
+        } else if entry.starts_with('+') {
+            white.insert(entry[1..].into());
+        } else {
+            white.insert(entry.into());
+        }
+    }
+
+    TargetFilter::new(black, white)
+}
+
 
 /// Initialize default mlzlog settings.
 ///
@@ -172,6 +225,15 @@ impl Append for RollingFileAppender {
 /// If `show_appname` is true, the appname is prepended to console messages.
 /// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
 /// `ConsoleAppender` is created to log to stdout.
+///
+/// Logger target filtering can be configured using the `MLZ_LOG_FILTER`
+/// environment variable.  Its syntax is "[+-]?target1,[+-]?target2,..."  where
+/// `+` or no prefix enters the target into a whitelist, while `-` enters it
+/// into a blacklist.  If there are no whitelist entries, anything not in the
+/// blacklist will be let through.
+///
+/// The black- and whitelists are checked for the record's target and then for
+/// its parents (as given by `rust::module::paths`).  The first match wins.
 pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
                             show_appname: bool, debug: bool, use_stdout: bool)
                             -> io::Result<()> {
@@ -188,20 +250,28 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
         }
     }
 
+    let filter = env::var("MLZ_LOG_FILTER").ok().map(parse_filter_config);
+
     if let Some(p) = log_path {
         ensure_dir(&p)?;
         let file_appender = RollingFileAppender::new(&p, appname);
         root_cfg = root_cfg.appender("file");
-        config = config
-            .appender(Appender::builder().build("file", Box::new(file_appender)));
+        let mut app_builder = Appender::builder();
+        if let Some(ref f) = filter {
+            app_builder = app_builder.filter(Box::new(f.clone()));
+        }
+        config = config.appender(app_builder.build("file", Box::new(file_appender)));
     }
     if use_stdout {
         let appname_prefix = format!("[{}] ", appname);
         let prefix = if show_appname { &appname_prefix } else { "" };
         let con_appender = ConsoleAppender::new(prefix);
         root_cfg = root_cfg.appender("con");
-        config = config
-            .appender(Appender::builder().build("con", Box::new(con_appender)));
+        let mut app_builder = Appender::builder();
+        if let Some(ref f) = filter {
+            app_builder = app_builder.filter(Box::new(f.clone()));
+        }
+        config = config.appender(app_builder.build("con", Box::new(con_appender)));
     }
     let config = config.build(root_cfg.build(if debug { LevelFilter::Debug }
                                              else { LevelFilter::Info }))
