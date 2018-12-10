@@ -4,14 +4,7 @@
 //! [`log4rs`]: https://github.com/sfackler/log4rs
 //! [`mlzlog`]: http://pypi.python.org/pypi/mlzlog
 
-pub extern crate log4rs;
-
-extern crate log;
-extern crate log_mdc;
-extern crate time;
-extern crate fxhash;
-extern crate ansi_term;
-extern crate parking_lot;
+pub use log4rs;
 
 use std::env;
 use std::fmt;
@@ -177,7 +170,7 @@ impl TargetFilter {
     }
 
     fn filter_inner(&self, target: &str) -> FilterResponse {
-        use FilterResponse::*;
+        use self::FilterResponse::*;
         if self.black.contains(target) {
             Reject
         } else if self.white.contains(target) {
