@@ -12,7 +12,7 @@ use std::error::Error;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
 use std::io::{self, Stdout, Write, BufWriter};
 use std::path::{Path, PathBuf};
-use fxhash::FxHashSet;
+use hashbrown::HashSet;
 use parking_lot::Mutex;
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::symlink;
@@ -64,7 +64,7 @@ impl Default for ConsoleAppender {
 }
 
 impl Append for ConsoleAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut stdout = self.stdout.lock();
         let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         let msg = log_mdc::get("thread", |thread_str| {
@@ -135,7 +135,7 @@ impl RollingFileAppender {
 }
 
 impl Append for RollingFileAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
         let (ref mut file_opt, ref mut roll_at) = *self.file.lock();
         if file_opt.is_none() || get_time() >= *roll_at {
             self.rollover(file_opt, roll_at)?;
@@ -154,8 +154,8 @@ impl Append for RollingFileAppender {
 /// A log4rs filter for filtering by target.
 #[derive(Debug, Clone)]
 pub struct TargetFilter {
-    black: FxHashSet<String>,
-    white: FxHashSet<String>,
+    black: HashSet<String>,
+    white: HashSet<String>,
 }
 
 impl Filter for TargetFilter {
@@ -165,7 +165,7 @@ impl Filter for TargetFilter {
 }
 
 impl TargetFilter {
-    fn new(black: FxHashSet<String>, white: FxHashSet<String>) -> Self {
+    fn new(black: HashSet<String>, white: HashSet<String>) -> Self {
         Self { black, white }
     }
 
@@ -185,8 +185,8 @@ impl TargetFilter {
 }
 
 fn parse_filter_config(cfg: String) -> TargetFilter {
-    let mut black = FxHashSet::default();
-    let mut white = FxHashSet::default();
+    let mut black = HashSet::default();
+    let mut white = HashSet::default();
 
     for entry in cfg.split(',') {
         if entry.starts_with('-') {
