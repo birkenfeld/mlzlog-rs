@@ -151,6 +151,24 @@ impl Append for RollingFileAppender {
     }
 }
 
+#[cfg(feature="systemd")]
+use systemd::journal;
+
+/// An appender which logs to the systemd journal.
+#[derive(Debug)]
+#[cfg(feature="systemd")]
+pub struct JournalAppender;
+
+#[cfg(feature="systemd")]
+impl Append for JournalAppender {
+    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+        journal::log_record(record);
+        Ok(())
+    }
+
+    fn flush(&self) { }
+}
+
 /// A log4rs filter for filtering by target.
 #[derive(Debug, Clone)]
 pub struct TargetFilter {
@@ -228,7 +246,8 @@ fn parse_filter_config(cfg: String) -> TargetFilter {
 /// The black- and whitelists are checked for the record's target and then for
 /// its parents (as given by `rust::module::paths`).  The first match wins.
 pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
-                            show_appname: bool, debug: bool, use_stdout: bool)
+                            show_appname: bool, debug: bool,
+                            use_stdout: bool, use_journal: bool)
                             -> io::Result<()> {
     let mut config = Config::builder();
     let mut root_cfg = Root::builder();
@@ -265,6 +284,24 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
             app_builder = app_builder.filter(Box::new(f.clone()));
         }
         config = config.appender(app_builder.build("con", Box::new(con_appender)));
+    }
+    #[cfg(feature="systemd")]
+    {
+        if use_journal {
+            let mut app_builder = Appender::builder();
+            if let Some(ref f) = filter {
+                app_builder = app_builder.filter(Box::new(f.clone()));
+            }
+            config = config.appender(app_builder.build("journal", Box::new(JournalAppender)));
+        }
+    }
+    #[cfg(not(feature="systemd"))]
+    {
+        if use_journal {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "journal integration requested, but not built into crate".to_string()));
+        }
     }
     let config = config.build(root_cfg.build(if debug { LevelFilter::Debug }
                                              else { LevelFilter::Info }))
