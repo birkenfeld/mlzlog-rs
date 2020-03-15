@@ -91,6 +91,58 @@ impl Append for ConsoleAppender {
 }
 
 
+/// A log4rs appender that writes uncolored log messages to stdout.
+pub struct PlainConsoleAppender {
+    prefix: String,
+    stdout: Stdout,
+}
+
+impl fmt::Debug for PlainConsoleAppender {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.write_str("<console>")
+    }
+}
+
+impl PlainConsoleAppender {
+    pub fn new(prefix: &str) -> Self {
+        Self { prefix: prefix.into(),
+               stdout: io::stdout(), }
+    }
+}
+
+impl Default for PlainConsoleAppender {
+    fn default() -> Self {
+        Self::new("")
+    }
+}
+
+impl Append for PlainConsoleAppender {
+    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut stdout = self.stdout.lock();
+        let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
+        log_mdc::get("thread", |thread_str| {
+            let thread_str = thread_str.unwrap_or("");
+            match record.level() {
+                Level::Error => writeln!(stdout, "{} {}{}ERROR: {}",
+                                         time_str, self.prefix, thread_str, record.args()),
+                Level::Warn  => writeln!(stdout, "{} {}{}WARNING: {}",
+                                         time_str, self.prefix, thread_str, record.args()),
+                Level::Debug => writeln!(stdout, "{} {}{}DEBUG: {}",
+                                         time_str, self.prefix, thread_str, record.args()),
+                _ =>            writeln!(stdout, "{} {}{}{}",
+                                         time_str, self.prefix, thread_str, record.args()),
+            }
+        })?;
+        stdout.flush()?;
+        Ok(())
+    }
+
+    fn flush(&self) {
+        // nothing here, like in upstream appender impl
+    }
+}
+
+
 type Writer = SimpleWriter<BufWriter<File>>;
 
 /// A log4rs appender that writes to daily rolling logfiles with the date
@@ -220,6 +272,43 @@ fn parse_filter_config(cfg: String) -> TargetFilter {
 }
 
 
+/// Settings struct for mlzlog::init().
+///
+/// It is recommended to use this as
+///
+/// ```
+/// # use mlzlog::Settings;
+/// let settings = Settings { show_appname: false, .. Settings::default() };
+/// ```
+///
+/// to avoid code breaking when new options are added.
+///
+/// If `show_appname` is true, the appname is prepended to console messages.
+/// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
+/// `ConsoleAppender` is created to log to stdout.  If `use_journal` is true,
+/// messages will be written to journald.
+#[derive(Debug, Clone)]
+pub struct Settings {
+    pub show_appname: bool,
+    pub debug: bool,
+    pub use_stdout: bool,
+    pub stdout_color: bool,
+    pub use_journal: bool,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            show_appname: true,
+            debug: false,
+            use_stdout: true,
+            stdout_color: true,
+            use_journal: false,
+        }
+    }
+}
+
+
 /// Initialize default mlzlog settings.
 ///
 /// `log_path` is the base path for logfiles.  The `appname` is used as the base
@@ -233,10 +322,6 @@ fn parse_filter_config(cfg: String) -> TargetFilter {
 /// variabled named `MLZ_LOG_PATH`.  If it is empty, no logfiles are written,
 /// else it specifies the new base path.
 ///
-/// If `show_appname` is true, the appname is prepended to console messages.
-/// If `debug` is true, debug messages are output.  If `use_stdout` is true, a
-/// `ConsoleAppender` is created to log to stdout.
-///
 /// Logger target filtering can be configured using the `MLZ_LOG_FILTER`
 /// environment variable.  Its syntax is "[+-]?target1,[+-]?target2,..."  where
 /// `+` or no prefix enters the target into a whitelist, while `-` enters it
@@ -245,10 +330,7 @@ fn parse_filter_config(cfg: String) -> TargetFilter {
 ///
 /// The black- and whitelists are checked for the record's target and then for
 /// its parents (as given by `rust::module::paths`).  The first match wins.
-pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
-                            show_appname: bool, debug: bool,
-                            use_stdout: bool, use_journal: bool)
-                            -> io::Result<()> {
+pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str, settings: Settings) -> io::Result<()> {
     let mut config = Config::builder();
     let mut root_cfg = Root::builder();
     let mut log_path = log_path.map(|p| p.as_ref().to_path_buf());
@@ -274,16 +356,21 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
         }
         config = config.appender(app_builder.build("file", Box::new(file_appender)));
     }
-    if use_stdout {
+    if settings.use_stdout {
         let appname_prefix = format!("[{}] ", appname);
-        let prefix = if show_appname { &appname_prefix } else { "" };
-        let con_appender = ConsoleAppender::new(prefix);
+        let prefix = if settings.show_appname { &appname_prefix } else { "" };
         root_cfg = root_cfg.appender("con");
         let mut app_builder = Appender::builder();
         if let Some(ref f) = filter {
             app_builder = app_builder.filter(Box::new(f.clone()));
         }
-        config = config.appender(app_builder.build("con", Box::new(con_appender)));
+        if settings.stdout_color {
+            let con_appender = ConsoleAppender::new(prefix);
+            config = config.appender(app_builder.build("con", Box::new(con_appender)));
+        } else {
+            let con_appender = PlainConsoleAppender::new(prefix);
+            config = config.appender(app_builder.build("con", Box::new(con_appender)));
+        }
     }
     #[cfg(feature="systemd")]
     {
@@ -297,13 +384,13 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str,
     }
     #[cfg(not(feature="systemd"))]
     {
-        if use_journal {
+        if settings.use_journal {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
                 "journal integration requested, but not built into crate".to_string()));
         }
     }
-    let config = config.build(root_cfg.build(if debug { LevelFilter::Debug }
+    let config = config.build(root_cfg.build(if settings.debug { LevelFilter::Debug }
                                              else { LevelFilter::Info }))
                        .expect("error building logging config");
 
