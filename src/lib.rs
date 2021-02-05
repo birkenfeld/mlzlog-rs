@@ -8,7 +8,6 @@ pub use log4rs;
 
 use std::env;
 use std::fmt;
-use std::error::Error;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
 use std::io::{self, Stdout, Write, BufWriter};
 use std::path::{Path, PathBuf};
@@ -64,7 +63,7 @@ impl Default for ConsoleAppender {
 }
 
 impl Append for ConsoleAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> anyhow::Result<()> {
         let mut stdout = self.stdout.lock();
         let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         let msg = log_mdc::get("thread", |thread_str| {
@@ -117,7 +116,7 @@ impl Default for PlainConsoleAppender {
 }
 
 impl Append for PlainConsoleAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> anyhow::Result<()> {
         let mut stdout = self.stdout.lock();
         let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         log_mdc::get("thread", |thread_str| {
@@ -187,7 +186,7 @@ impl RollingFileAppender {
 }
 
 impl Append for RollingFileAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> anyhow::Result<()> {
         let (ref mut file_opt, ref mut roll_at) = *self.file.lock();
         if file_opt.is_none() || get_time() >= *roll_at {
             self.rollover(file_opt, roll_at)?;
@@ -213,7 +212,7 @@ pub struct JournalAppender;
 
 #[cfg(feature="systemd")]
 impl Append for JournalAppender {
-    fn append(&self, record: &Record) -> Result<(), Box<dyn Error + Send + Sync>> {
+    fn append(&self, record: &Record) -> anyhow::Result<()> {
         journal::log_record(record);
         Ok(())
     }
@@ -374,7 +373,7 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str, settings: Settin
     }
     #[cfg(feature="systemd")]
     {
-        if use_journal {
+        if settings.use_journal {
             let mut app_builder = Appender::builder();
             if let Some(ref f) = filter {
                 app_builder = app_builder.filter(Box::new(f.clone()));

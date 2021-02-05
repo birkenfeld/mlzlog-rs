@@ -24,6 +24,8 @@ log = "*"
 mlzlog = "*"
 ```
 
+Minimum supported Rust versions is 1.41.1.
+
 Usage
 =====
 
