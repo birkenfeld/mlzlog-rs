@@ -20,8 +20,8 @@ on [crates.io](https://crates.io/crates/mlzlog) with a `Cargo.toml` like:
 
 ```toml
 [dependencies]
-log = "*"
-mlzlog = "*"
+log = "0.4"
+mlzlog = "0.7"
 ```
 
 Minimum supported Rust versions is 1.41.1.
@@ -33,12 +33,10 @@ Initialize logging at the beginning of your program and then use the
 macros from the `log` crate. Example:
 
 ```rust
-#[macro_use]
-extern crate log;
-extern crate mlzlog;
+use log::info;
 
 fn main() {
-    mlzlog::init("/path/to/base", "myapp", false, true);
+    mlzlog::init("/path/to/base", "myapp", mlzlog::Settings { ... });
 
     info!("starting up");
 }
