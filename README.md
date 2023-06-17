@@ -21,10 +21,10 @@ on [crates.io](https://crates.io/crates/mlzlog) with a `Cargo.toml` like:
 ```toml
 [dependencies]
 log = "0.4"
-mlzlog = "0.7"
+mlzlog = "0.8"
 ```
 
-Minimum supported Rust versions is 1.41.1.
+Minimum supported Rust versions is 1.63.0.
 
 Usage
 =====

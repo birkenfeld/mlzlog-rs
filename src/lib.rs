@@ -11,6 +11,7 @@ use std::fmt;
 use std::fs::{DirBuilder, File, OpenOptions, remove_file};
 use std::io::{self, Stdout, Write, BufWriter};
 use std::path::{Path, PathBuf};
+use once_cell::sync::Lazy;
 use hashbrown::HashSet;
 use parking_lot::Mutex;
 #[cfg(target_family = "unix")]
@@ -18,7 +19,7 @@ use std::os::unix::fs::symlink;
 #[cfg(target_family = "windows")]
 use std::os::windows::fs::symlink_file as symlink;
 
-use time::{Timespec, Tm, Duration, get_time, now, strftime};
+use time::{OffsetDateTime, Time, Duration};
 use log::{Level, Record, LevelFilter};
 use log4rs::append::Append;
 use log4rs::filter::{Filter, Response as FilterResponse};
@@ -28,6 +29,22 @@ use log4rs::encode::writer::simple::SimpleWriter;
 use log4rs::config::{Config, Root, Appender};
 use ansi_term::Colour::{Red, White, Purple};
 
+
+static HMS: Lazy<Vec<time::format_description::FormatItem>> = Lazy::new(|| {
+    time::format_description::parse_borrowed::<2>(r"\[[hour]:[minute]:[second]\]").unwrap()
+});
+
+static YMD: Lazy<Vec<time::format_description::FormatItem>> = Lazy::new(|| {
+    time::format_description::parse_borrowed::<2>(r"[year]-[month]-[day]").unwrap()
+});
+
+fn time_now() -> String {
+    OffsetDateTime::now_local().unwrap().format(&HMS).unwrap()
+}
+
+fn date_now() -> String {
+    OffsetDateTime::now_local().unwrap().format(&YMD).unwrap()
+}
 
 fn ensure_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
     if path.as_ref().is_dir() {
@@ -65,7 +82,6 @@ impl Default for ConsoleAppender {
 impl Append for ConsoleAppender {
     fn append(&self, record: &Record) -> anyhow::Result<()> {
         let mut stdout = self.stdout.lock();
-        let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         let msg = log_mdc::get("thread", |thread_str| {
             let thread_str = thread_str.unwrap_or("");
             match record.level() {
@@ -79,7 +95,7 @@ impl Append for ConsoleAppender {
                     format!("{}{}{}", self.prefix, thread_str, record.args())),
             }
         });
-        writeln!(stdout, "{} {}", White.paint(time_str), msg)?;
+        writeln!(stdout, "{} {}", White.paint(time_now()), msg)?;
         stdout.flush()?;
         Ok(())
     }
@@ -118,18 +134,17 @@ impl Default for PlainConsoleAppender {
 impl Append for PlainConsoleAppender {
     fn append(&self, record: &Record) -> anyhow::Result<()> {
         let mut stdout = self.stdout.lock();
-        let time_str = strftime("[%H:%M:%S]", &now()).unwrap();
         log_mdc::get("thread", |thread_str| {
             let thread_str = thread_str.unwrap_or("");
             match record.level() {
                 Level::Error => writeln!(stdout, "{} {}{}ERROR: {}",
-                                         time_str, self.prefix, thread_str, record.args()),
+                                         time_now(), self.prefix, thread_str, record.args()),
                 Level::Warn  => writeln!(stdout, "{} {}{}WARNING: {}",
-                                         time_str, self.prefix, thread_str, record.args()),
+                                         time_now(), self.prefix, thread_str, record.args()),
                 Level::Debug => writeln!(stdout, "{} {}{}DEBUG: {}",
-                                         time_str, self.prefix, thread_str, record.args()),
+                                         time_now(), self.prefix, thread_str, record.args()),
                 _ =>            writeln!(stdout, "{} {}{}{}",
-                                         time_str, self.prefix, thread_str, record.args()),
+                                         time_now(), self.prefix, thread_str, record.args()),
             }
         })?;
         stdout.flush()?;
@@ -151,14 +166,14 @@ pub struct RollingFileAppender {
     dir:     PathBuf,
     prefix:  String,
     link_fn: PathBuf,
-    file:    Mutex<(Option<Writer>, Timespec)>,
+    file:    Mutex<(Option<Writer>, OffsetDateTime)>,
     pattern: PatternEncoder,
 }
 
 impl RollingFileAppender {
     pub fn new(dir: &Path, prefix: &str) -> RollingFileAppender {
-        let thisday = Tm { tm_hour: 0, tm_min: 0, tm_sec: 0, tm_nsec: 0, ..now() };
-        let roll_at = (thisday + Duration::days(1)).to_timespec();
+        let thisday = OffsetDateTime::now_local().unwrap().replace_time(Time::MIDNIGHT);
+        let roll_at = thisday + Duration::days(1);
         let pattern = PatternEncoder::new("{d(%H:%M:%S,%f)(local)} : {l:<5} : {X(thread)}{m}{n}");
         let link_fn = dir.join("current");
         let prefix = prefix.replace("/", "-");
@@ -169,10 +184,9 @@ impl RollingFileAppender {
                               pattern, }
     }
 
-    fn rollover(&self, file_opt: &mut Option<Writer>, roll_at: &mut Timespec) -> io::Result<()> {
+    fn rollover(&self, file_opt: &mut Option<Writer>, roll_at: &mut OffsetDateTime) -> io::Result<()> {
         file_opt.take(); // will drop the file if open
-        let time = strftime("%Y-%m-%d", &now()).unwrap();
-        let full = format!("{}-{}.log", self.prefix, time);
+        let full = format!("{}-{}.log", self.prefix, date_now());
         let new_fn = self.dir.join(full);
         let fp = OpenOptions::new()
             .create(true).write(true).append(true)
@@ -188,7 +202,7 @@ impl RollingFileAppender {
 impl Append for RollingFileAppender {
     fn append(&self, record: &Record) -> anyhow::Result<()> {
         let (ref mut file_opt, ref mut roll_at) = *self.file.lock();
-        if file_opt.is_none() || get_time() >= *roll_at {
+        if file_opt.is_none() || OffsetDateTime::now_utc() >= *roll_at {
             self.rollover(file_opt, roll_at)?;
         }
         let fp = file_opt.as_mut().unwrap();
