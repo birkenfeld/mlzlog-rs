@@ -1,6 +1,6 @@
 [package]
 name = "mlzlog"
-version = "0.7.0"
+version = "0.8.0"
 authors = ["Georg Brandl <g.brandl@fz-juelich.de>"]
 license = "MIT/Apache-2.0"
 description = "A collection of log4rs tools to log like the mlzlog Python package"
