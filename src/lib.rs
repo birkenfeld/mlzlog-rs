@@ -176,7 +176,7 @@ impl RollingFileAppender {
         let roll_at = thisday + Duration::days(1);
         let pattern = PatternEncoder::new("{d(%H:%M:%S,%f)(local)} : {l:<5} : {X(thread)}{m}{n}");
         let link_fn = dir.join("current");
-        let prefix = prefix.replace("/", "-");
+        let prefix = prefix.replace('/', "-");
         RollingFileAppender { dir: dir.to_path_buf(),
                               prefix,
                               link_fn,
@@ -193,8 +193,8 @@ impl RollingFileAppender {
             .open(&new_fn)?;
         *file_opt = Some(SimpleWriter(BufWriter::new(fp)));
         let _ = remove_file(&self.link_fn);
-        let _ = symlink(&new_fn.file_name().unwrap(), &self.link_fn);
-        *roll_at = *roll_at + Duration::days(1);
+        let _ = symlink(new_fn.file_name().unwrap(), &self.link_fn);
+        *roll_at += Duration::days(1);
         Ok(())
     }
 }
@@ -260,9 +260,9 @@ impl TargetFilter {
             Neutral
         } else {
             // no specific entry for this module, try the parent
-            target.rsplitn(2, "::").nth(1).map_or_else(
+            target.rsplit_once("::").map_or_else(
                 || if self.white.is_empty() { Neutral } else { Reject },
-                |parent| self.filter_inner(parent))
+                |(parent, _)| self.filter_inner(parent))
         }
     }
 }
@@ -272,10 +272,10 @@ fn parse_filter_config(cfg: String) -> TargetFilter {
     let mut white = HashSet::default();
 
     for entry in cfg.split(',') {
-        if entry.starts_with('-') {
-            black.insert(entry[1..].into());
-        } else if entry.starts_with('+') {
-            white.insert(entry[1..].into());
+        if let Some(rest) = entry.strip_prefix('-') {
+            black.insert(rest.into());
+        } else if let Some(rest) = entry.strip_prefix('+') {
+            white.insert(rest.into());
         } else {
             white.insert(entry.into());
         }
@@ -370,7 +370,7 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str, settings: Settin
         config = config.appender(app_builder.build("file", Box::new(file_appender)));
     }
     if settings.use_stdout {
-        let appname_prefix = format!("[{}] ", appname);
+        let appname_prefix = format!("[{appname}] ");
         let prefix = if settings.show_appname { &appname_prefix } else { "" };
         root_cfg = root_cfg.appender("con");
         let mut app_builder = Appender::builder();
