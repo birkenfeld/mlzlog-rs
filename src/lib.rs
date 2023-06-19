@@ -19,7 +19,7 @@ use std::os::unix::fs::symlink;
 #[cfg(target_family = "windows")]
 use std::os::windows::fs::symlink_file as symlink;
 
-use time::{OffsetDateTime, Time, Duration};
+use time::{OffsetDateTime, Time, Duration, util::local_offset};
 use log::{Level, Record, LevelFilter};
 use log4rs::append::Append;
 use log4rs::filter::{Filter, Response as FilterResponse};
@@ -355,6 +355,10 @@ pub fn init<P: AsRef<Path>>(log_path: Option<P>, appname: &str, settings: Settin
         } else {
             log_path = Some(Path::new(&path).to_path_buf());
         }
+    }
+
+    unsafe {
+        local_offset::set_soundness(local_offset::Soundness::Unsound);
     }
 
     let filter = env::var("MLZ_LOG_FILTER").ok().map(parse_filter_config);
