@@ -180,7 +180,7 @@ impl RollingFileAppender {
         let full = format!("{}-{}.log", self.prefix, date_now());
         let new_fn = self.dir.join(full);
         let fp = OpenOptions::new()
-            .create(true).write(true).append(true)
+            .create(true).append(true)
             .open(&new_fn)?;
         *file_opt = Some(SimpleWriter(BufWriter::new(fp)));
         let _ = remove_file(&self.link_fn);
